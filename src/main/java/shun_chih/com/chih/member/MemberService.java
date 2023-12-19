@@ -76,7 +76,7 @@ public class MemberService {
                 })
                 .or(() -> {
                     String randomAvatarLink = stringRedisTemplate.opsForSet().randomMember("randomAvatarLinks");
-                    if (randomAvatarLink == null || randomAvatarLink.isBlank()) {
+                    if (randomAvatarLink.isBlank()) {
                         randomAvatarLink = restTemplate.getForEntity(avatarUri, String.class).getBody();
                     }
 
