@@ -1,8 +1,11 @@
 package shun_chih.com.chih.member;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -10,6 +13,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import shun_chih.com.chih.member.data.dto.MemberLoginResponseDTO;
 import shun_chih.com.chih.member.data.enu.MemberLoginType;
 import shun_chih.com.chih.member.data.enu.MemberRole;
 import shun_chih.com.chih.member.data.enu.MemberStatus;
@@ -20,6 +24,10 @@ import shun_chih.com.chih.wallet.data.enu.WalletStatus;
 import shun_chih.com.chih.wallet.data.po.WalletPO;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 
 @Service
@@ -115,5 +123,55 @@ public class MemberService {
 
                     return Optional.of(memberPO);
                 });
+    }
+
+    @CachePut(cacheNames = {"members"}, key = "#result.username")
+    public Optional<MemberPO> modifyAbout(String username, String about) {
+        return memberRepository
+                .findByUsername(username)
+                .map(v -> {
+                    v.setAbout(about);
+                    return memberRepository.save(v);
+                });
+    }
+
+    public Optional<String> modifyPassword(String username, String oldPassword, String newPassword) {
+        return memberRepository
+                .findByUsername(username)
+                .filter(v -> passwordEncoder.matches(oldPassword, v.getPassword()))
+                .map(v -> {
+                    v.setPassword(passwordEncoder.encode(newPassword));
+                    final MemberPO memberPO = memberRepository.save(v);
+                    return memberPO.getUsername();
+                });
+    }
+
+    @CacheEvict(cacheNames = {"members"}, key = "#username")
+    public Optional<MemberPO> remove(String username) {
+        return memberRepository
+                .findByUsername(username)
+                .flatMap(v -> {
+                    v.setStatus(MemberStatus.FREEZE);
+                    final MemberPO memberPO = memberRepository.save(v);
+                    return walletRepository
+                            .findByMemberId(memberPO.getId())
+                            .map(w -> {
+                                w.setStatus(WalletStatus.FREEZE);
+                                walletRepository.save(w);
+                                return v;
+                            });
+                });
+    }
+
+    public Page<MemberLoginResponseDTO> queryMembersRecords(String username, Integer page, Integer size) {
+        return memberLoginRepository
+                .findAllByUsernameOrderByCreatedByDesc(username, PageRequest.of(page, size))
+                .map(v -> MemberLoginResponseDTO
+                        .builder()
+                        .username(v.getUsername())
+                        .type(v.getType())
+                        .createdBy(v.getCreatedBy())
+                        .createdByStr(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(OffsetDateTime.ofInstant(Instant.ofEpochMilli(v.getCreatedDate()), ZoneOffset.ofHours(8))))
+                        .build());
     }
 }
